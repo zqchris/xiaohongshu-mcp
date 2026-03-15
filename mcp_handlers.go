@@ -346,13 +346,12 @@ func (s *AppServer) handleSearchFeeds(ctx context.Context, args SearchFeedsArgs)
 
 	logrus.Infof("MCP: 搜索Feeds - 关键词: %s", args.Keyword)
 
-	// 将 MCP 的 FilterOption 转换为 xiaohongshu.FilterOption
 	filter := xiaohongshu.FilterOption{
-		SortBy:      args.Filters.SortBy,
-		NoteType:    args.Filters.NoteType,
-		PublishTime: args.Filters.PublishTime,
-		SearchScope: args.Filters.SearchScope,
-		Location:    args.Filters.Location,
+		SortBy:      args.SortBy,
+		NoteType:    args.NoteType,
+		PublishTime: args.PublishTime,
+		SearchScope: args.SearchScope,
+		Location:    args.Location,
 	}
 
 	result, err := s.xiaohongshuService.SearchFeeds(ctx, args.Keyword, filter)
