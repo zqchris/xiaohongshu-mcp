@@ -84,31 +84,46 @@ func (f *FeedDetailAction) GetFeedDetailWithConfig(ctx context.Context, feedID, 
 	logrus.Infof("配置: 点击更多=%v, 回复阈值=%d, 最大评论数=%d, 滚动速度=%s",
 		config.ClickMoreReplies, config.MaxRepliesThreshold, config.MaxCommentItems, config.ScrollSpeed)
 
-	// 使用retry-go处理页面导航和DOM稳定等待
+	// 导航到页面
+	page.MustNavigate(url)
+
+	// 等 __INITIAL_STATE__ 有实际数据即可，不等整个 DOM 渲染完
 	err := retry.Do(
 		func() error {
-			page.MustNavigate(url)
-			page.MustWaitDOMStable()
-			return nil
+			ready := page.MustEval(`() => {
+				const s = window.__INITIAL_STATE__;
+				if (!s || !s.note || !s.note.noteDetailMap) return false;
+				const map = s.note.noteDetailMap;
+				for (const key in map) {
+					if (map[key] && map[key].note && map[key].note.noteId) return true;
+				}
+				return false;
+			}`).Bool()
+			if ready {
+				return nil
+			}
+			return fmt.Errorf("__INITIAL_STATE__ not ready")
 		},
-		retry.Attempts(3),
-		retry.Delay(500*time.Millisecond),
-		retry.MaxJitter(1000*time.Millisecond),
+		retry.Attempts(50),
+		retry.Delay(100*time.Millisecond),
 		retry.OnRetry(func(n uint, err error) {
-			logrus.Debugf("页面导航重试 #%d: %v", n, err)
+			logrus.Debugf("等待 __INITIAL_STATE__ #%d", n)
 		}),
 	)
-	if err != nil {
-		logrus.Errorf("页面导航失败: %v", err)
-		return nil, err
-	}
-	sleepRandom(1000, 1000)
 
-	if err := checkPageAccessible(page); err != nil {
-		return nil, err
+	if err != nil {
+		// 数据未就绪，检查是否页面不可访问
+		if accessErr := checkPageAccessible(page); accessErr != nil {
+			return nil, accessErr
+		}
+		return nil, fmt.Errorf("timeout waiting for note data: %w", err)
 	}
+
+	sleepRandom(1000, 1000) // 反爬间隔
 
 	if loadAllComments {
+		// 评论加载需要 DOM 交互，等 DOM 稳定
+		page.MustWaitDOMStable()
 		if err := f.loadAllCommentsWithConfig(page, config); err != nil {
 			logrus.Warnf("加载全部评论失败: %v", err)
 		}
