@@ -302,6 +302,35 @@ func (s *AppServer) handleListFeeds(ctx context.Context) *MCPToolResult {
 }
 
 // handleSearchFeeds 处理搜索Feeds
+// SimplifiedResult 扁平化的搜索结果，对 AI 更友好
+type SimplifiedResult struct {
+	ID        string `json:"id"`
+	XsecToken string `json:"xsecToken"`
+	Title     string `json:"title"`
+	Type      string `json:"type"` // "video" or "image"
+	Author    string `json:"author"`
+	AuthorID  string `json:"authorId"`
+	Likes     int    `json:"likes"`
+	Comments  int    `json:"comments"`
+	Shares    int    `json:"shares"`
+	Collects  int    `json:"collects"`
+	CoverURL  string `json:"coverUrl"`
+	CoverSize string `json:"coverSize"` // "WxH"
+	Duration  int    `json:"duration,omitempty"` // seconds, video only
+}
+
+// SimplifiedSearchResponse 简化的搜索响应
+type SimplifiedSearchResponse struct {
+	Results []SimplifiedResult `json:"results"`
+	Count   int                `json:"count"`
+}
+
+// toInt safely converts a string count to int
+func toInt(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
 func (s *AppServer) handleSearchFeeds(ctx context.Context, args SearchFeedsArgs) *MCPToolResult {
 	logrus.Info("MCP: 搜索Feeds")
 
@@ -337,8 +366,49 @@ func (s *AppServer) handleSearchFeeds(ctx context.Context, args SearchFeedsArgs)
 		}
 	}
 
-	// 格式化输出，转换为JSON字符串
-	jsonData, err := json.MarshalIndent(result, "", "  ")
+	// 扁平化转换：去掉嵌套、空字段、冗余数据
+	simplified := SimplifiedSearchResponse{
+		Count: result.Count,
+	}
+	for _, f := range result.Feeds {
+		noteType := f.NoteCard.Type
+		if noteType == "normal" {
+			noteType = "image"
+		}
+
+		author := f.NoteCard.User.Nickname
+		if author == "" {
+			author = f.NoteCard.User.NickName
+		}
+
+		coverURL := f.NoteCard.Cover.URLDefault
+		if coverURL == "" {
+			coverURL = f.NoteCard.Cover.URLPre
+		}
+
+		sr := SimplifiedResult{
+			ID:        f.ID,
+			XsecToken: f.XsecToken,
+			Title:     f.NoteCard.DisplayTitle,
+			Type:      noteType,
+			Author:    author,
+			AuthorID:  f.NoteCard.User.UserID,
+			Likes:     toInt(f.NoteCard.InteractInfo.LikedCount),
+			Comments:  toInt(f.NoteCard.InteractInfo.CommentCount),
+			Shares:    toInt(f.NoteCard.InteractInfo.SharedCount),
+			Collects:  toInt(f.NoteCard.InteractInfo.CollectedCount),
+			CoverURL:  coverURL,
+			CoverSize: fmt.Sprintf("%dx%d", f.NoteCard.Cover.Width, f.NoteCard.Cover.Height),
+		}
+
+		if f.NoteCard.Video != nil && f.NoteCard.Video.Capa.Duration > 0 {
+			sr.Duration = f.NoteCard.Video.Capa.Duration
+		}
+
+		simplified.Results = append(simplified.Results, sr)
+	}
+
+	jsonData, err := json.MarshalIndent(simplified, "", "  ")
 	if err != nil {
 		return &MCPToolResult{
 			Content: []MCPContent{{

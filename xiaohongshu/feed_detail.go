@@ -856,10 +856,36 @@ func (f *FeedDetailAction) extractFeedDetail(page *rod.Page, feedID string) (*Fe
 		return nil, fmt.Errorf("feed %s not found in noteDetailMap", feedID)
 	}
 
+	// Upgrade imageList URLs to high-quality originals
+	for i := range noteDetail.Note.ImageList {
+		img := &noteDetail.Note.ImageList[i]
+		if hqURL := upgradeImageURL(img.URLDefault); hqURL != "" {
+			img.URLDefault = hqURL
+		}
+	}
+
 	return &FeedDetailResponse{
 		Note:     noteDetail.Note,
 		Comments: noteDetail.Comments,
 	}, nil
+}
+
+// upgradeImageURL converts a CDN preview URL to a high-quality original URL.
+// sns-webpic-qc.xhscdn.com serves compressed webp; sns-img-bd.xhscdn.com serves originals.
+func upgradeImageURL(cdnURL string) string {
+	prefixes := []string{"/notes_pre_post/", "/note_pre_post_uhdr/", "/note_pre_post/"}
+	for _, prefix := range prefixes {
+		idx := strings.Index(cdnURL, prefix)
+		if idx < 0 {
+			continue
+		}
+		path := cdnURL[idx+1:]
+		if bangIdx := strings.Index(path, "!"); bangIdx > 0 {
+			path = path[:bangIdx]
+		}
+		return "https://sns-img-bd.xhscdn.com/" + path
+	}
+	return ""
 }
 
 func makeFeedDetailURL(feedID, xsecToken string) string {
